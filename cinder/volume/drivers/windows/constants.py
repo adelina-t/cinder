@@ -12,5 +12,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+DISK_FORMAT_VHD = "VHD"
+DISK_FORMAT_VHDX = "VHDX"
+
 VHD_TYPE_FIXED = 2
 VHD_TYPE_DYNAMIC = 3
+VHD_TYPE_DIFFERENCING = 4
