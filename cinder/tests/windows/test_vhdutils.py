@@ -12,6 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import importlib
 import mock
 
 from cinder import exception
@@ -55,6 +56,33 @@ class VHDUtilsTestCase(test.TestCase):
             create=True).start()
 
     def _test_convert_vhd(self, convertion_failed=False):
+        self._fake_ctypes = mock.MagicMock()
+        mock.patch.dict('sys.modules', ctypes=self._fake_ctypes).start()
+        mock.patch('os.name', 'nt').start()
+        self.addCleanup(mock.patch.stopall)
+
+        self._vhdutils_module = importlib.import_module(
+            'cinder.volume.drivers.windows.vhdutils')
+        self._fake_virtdisk = (
+            self._vhdutils_module.ctypes.windll.virtdisk)
+        # Use this in order to make assertions on the variables parsed by
+        # references.
+        self._vhdutils_module.ctypes.byref = lambda x: x
+        self._vhdutils_module.ctypes.c_wchar_p = lambda x: x
+
+        self._mock_win32_structures()
+        self._vhdutils = self._vhdutils_module.VHDUtils()
+
+    def _mock_win32_structures(self):
+        self._vhdutils_module.Win32_GUID = mock.Mock()
+        self._vhdutils_module.Win32_RESIZE_VIRTUAL_DISK_PARAMETERS = (
+            mock.Mock())
+        self._vhdutils_module.Win32_CREATE_VIRTUAL_DISK_PARAMETERS = (
+            mock.Mock())
+
+    def _test_convert_vhd(self, convertion_failed=False):
+        vhdutils = self._vhdutils_module
+
         self._vhdutils._get_device_id_by_path = mock.Mock(
             side_effect=(vhdutils.VIRTUAL_STORAGE_TYPE_DEVICE_VHD,
                          vhdutils.VIRTUAL_STORAGE_TYPE_DEVICE_VHDX))
