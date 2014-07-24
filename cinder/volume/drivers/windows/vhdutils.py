@@ -38,8 +38,6 @@ from cinder.openstack.common.gettextutils import _
 from cinder.openstack.common import log as logging
 from cinder.volume.drivers.windows import constants
 
-import pdb
-
 LOG = logging.getLogger(__name__)
 
 if os.name == 'nt':
@@ -104,9 +102,7 @@ CREATE_VHD_PARAMS_DEFAULT_BLOCK_SIZE = 0
 CREATE_VIRTUAL_DISK_FLAG_NONE = 0
 CREATE_VIRTUAL_DISK_FLAG_FULL_PHYSICAL_ALLOCATION = 1
 MERGE_VIRTUAL_DISK_VERSION_1 = 1
-MERGE_VIRTUAL_DISK_FLAG_NONE  = 0x00000000
-VIRTUAL_DISK_ACCESS_METAOPS    = 0x00200000
-
+MERGE_VIRTUAL_DISK_FLAG_NONE = 0x00000000
 
 
 class VHDUtils(object):
@@ -145,12 +141,13 @@ class VHDUtils(object):
         params = Win32_OPEN_VIRTUAL_DISK_PARAMETERS()
         params.Version = OPEN_VIRTUAL_DISK_VERSION_1
         params.RWDepth = rw_depth
-        
+
         ret_val = virtdisk.OpenVirtualDisk(ctypes.byref(vst),
                                            ctypes.c_wchar_p(vhd_path),
                                            VIRTUAL_DISK_ACCESS_ALL,
                                            OPEN_VIRTUAL_DISK_FLAG_NONE,
-                                           ctypes.byref(params), ctypes.byref(handle))
+                                           ctypes.byref(params),
+                                           ctypes.byref(handle))
         if ret_val:
             raise exception.VolumeBackendAPIException(
                 _("Opening virtual disk failed with error: %s") % ret_val)
@@ -184,7 +181,6 @@ class VHDUtils(object):
         if ret_val:
             raise exception.VolumeBackendAPIException(
                 _("Virtual disk resize failed with error: %s") % ret_val)
-        
 
     def merge_vhd(self, vhd_path):
         device_id = self._get_device_id_by_path(vhd_path)
@@ -195,47 +191,49 @@ class VHDUtils(object):
         params.MergeDepth = 1
 
         ret_val = virtdisk.MergeVirtualDisk(
-                    handle,
-                    MERGE_VIRTUAL_DISK_FLAG_NONE,
-                    ctypes.byref(params),
-                    None)
+            handle,
+            MERGE_VIRTUAL_DISK_FLAG_NONE,
+            ctypes.byref(params),
+            None)
         self._close(handle)
         if ret_val:
                 raise exception.VolumeBackendAPIException(
                     _("Virtual disk merge failed with error: %s") % ret_val)
-         
 
-
-    def convert_vhd(self, src, dest, vhd_type):
-        src_device_id = self._get_device_id_by_path(src)
-        dest_device_id = self._get_device_id_by_path(dest)
+    def _create_vhd(self, new_vhd_type, new_vhd_path, src_path=None,
+                    max_internal_size=0, parent_path=None):
+        new_device_id = self._get_device_id_by_path(new_vhd_path)
 
         vst = Win32_VIRTUAL_STORAGE_TYPE()
-        vst.DeviceId = dest_device_id
+        vst.DeviceId = new_device_id
         vst.VendorId = self._msft_vendor_id
 
         params = Win32_CREATE_VIRTUAL_DISK_PARAMETERS()
         params.Version = CREATE_VIRTUAL_DISK_VERSION_2
         params.UniqueId = Win32_GUID()
-        params.MaximumSize = 0
         params.BlockSizeInBytes = CREATE_VHD_PARAMS_DEFAULT_BLOCK_SIZE
         params.SectorSizeInBytes = 0x200
         params.PhysicalSectorSizeInBytes = 0x200
-        params.ParentPath = None
-        params.SourcePath = src
         params.OpenFlags = OPEN_VIRTUAL_DISK_FLAG_NONE
-        params.ParentVirtualStorageType = Win32_VIRTUAL_STORAGE_TYPE()
-        params.SourceVirtualStorageType = Win32_VIRTUAL_STORAGE_TYPE()
-        params.SourceVirtualStorageType.DeviceId = src_device_id
-        params.SourceVirtualStorageType.VendorId = self._msft_vendor_id
         params.ResiliencyGuid = Win32_GUID()
+        params.MaximumSize = max_internal_size
+        params.ParentPath = parent_path
+        params.ParentVirtualStorageType = Win32_VIRTUAL_STORAGE_TYPE()
+
+        if src_path:
+            src_device_id = self._get_device_id_by_path(src_path)
+            params.SourcePath = src_path
+            params.SourceVirtualStorageType.DeviceId = src_device_id
+            params.SourceVirtualStorageType.VendorId = self._msft_vendor_id
+            params.SourceVirtualStorageType = Win32_VIRTUAL_STORAGE_TYPE()
 
         handle = wintypes.HANDLE()
-        create_virtual_disk_flag = self.create_virtual_disk_flags.get(vhd_type)
+        create_virtual_disk_flag = self.create_virtual_disk_flags.get(
+            new_vhd_type)
 
         ret_val = virtdisk.CreateVirtualDisk(
             ctypes.byref(vst),
-            ctypes.c_wchar_p(dest),
+            ctypes.c_wchar_p(new_vhd_path),
             VIRTUAL_DISK_ACCESS_NONE,
             None,
             create_virtual_disk_flag,
@@ -244,7 +242,19 @@ class VHDUtils(object):
             None,
             ctypes.byref(handle))
         if ret_val:
-            raise exception.VolumeBackendAPIException(
-                _("Virtual disk conversion failed with error: %s") % ret_val)
-        self._close(handle)
+                raise exception.VolumeBackendAPIException(
+                    _("Virtual disk merge failed with error: %s") % ret_val)
 
+    def create_dynamic_vhd(self, path, max_internal_size):
+        self._create_vhd(new_vhd_type=constants.VHD_TYPE_DYNAMIC,
+                         new_vhd_path=path,
+                         max_internal_size=max_internal_size)
+
+    def convert_vhd(self, src, dest, vhd_type):
+        self._create_vhd(new_vhd_type=vhd_type, new_vhd_path=dest,
+                         src_path=src)
+
+    def create_differencing_image(self, path, parent_path):
+        self._create_vhd(new_vhd_type=constants.VHD_TYPE_DIFFERENCING,
+                         new_vhd_path=path,
+                         parent_path=parent_path)
