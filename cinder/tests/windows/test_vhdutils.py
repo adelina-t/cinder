@@ -50,8 +50,11 @@ class VHDUtilsTestCase(test.TestCase):
             'cinder.volume.drivers.windows.vhdutils', ctypes=fake_ctypes,
             windll=mock.DEFAULT, wintypes=mock.DEFAULT, kernel32=mock.DEFAULT,
             virtdisk=mock.DEFAULT, Win32_GUID=mock.DEFAULT,
+            Win32_OPEN_VIRTUAL_DISK_PARAMETERS=mock.DEFAULT,
             Win32_RESIZE_VIRTUAL_DISK_PARAMETERS=mock.DEFAULT,
             Win32_CREATE_VIRTUAL_DISK_PARAMETERS=mock.DEFAULT,
+            Win32_MERGE_VIRTUAL_DISK_PARAMETERS=mock.DEFAULT,
+            Win32_GET_VIRTUAL_DISK_INFO=mock.DEFAULT,
             create=True).start()
 
     def _test_convert_vhd(self, convertion_failed=False):
@@ -102,10 +105,16 @@ class VHDUtilsTestCase(test.TestCase):
         self._test_convert_vhd(True)
 
     def _test_open(self, open_failed=False):
+        fake_rw_depth = 2
+
         vhdutils.virtdisk.OpenVirtualDisk.return_value = int(open_failed)
 
         fake_vst = mock.Mock()
         vhdutils.Win32_VIRTUAL_STORAGE_TYPE = mock.Mock(return_value=fake_vst)
+
+        fake_params = vhdutils.Win32_OPEN_VIRTUAL_DISK_PARAMETERS()
+        fake_params.Version = vhdutils.OPEN_VIRTUAL_DISK_VERSION_1
+        fake_params.RWDepth = fake_rw_depth
 
         if open_failed:
             self.assertRaises(exception.VolumeBackendAPIException,
@@ -113,13 +122,13 @@ class VHDUtilsTestCase(test.TestCase):
                               self._FAKE_DEVICE_ID, self._FAKE_VHD_PATH)
         else:
             self._vhdutils._open(self._FAKE_DEVICE_ID,
-                                 self._FAKE_VHD_PATH)
+                                 self._FAKE_VHD_PATH, fake_rw_depth)
 
         vhdutils.virtdisk.OpenVirtualDisk.assert_called_with(
             vhdutils.ctypes.byref(fake_vst),
             vhdutils.ctypes.c_wchar_p(self._FAKE_VHD_PATH),
             vhdutils.VIRTUAL_DISK_ACCESS_ALL,
-            vhdutils.CREATE_VIRTUAL_DISK_FLAG_NONE, 0,
+            vhdutils.CREATE_VIRTUAL_DISK_FLAG_NONE, fake_params,
             vhdutils.ctypes.byref(vhdutils.wintypes.HANDLE()))
         self.assertEqual(self._FAKE_DEVICE_ID, fake_vst.DeviceId)
 
@@ -185,3 +194,82 @@ class VHDUtilsTestCase(test.TestCase):
     def test_resize_vhd_failed(self):
         self._test_resize_vhd(resize_failed=True)
 
+    def _test_merge_vhd(self, merge_failed=False):
+        fake_merge_depth = 1
+
+        self._vhdutils._get_device_id_by_path = mock.Mock(
+            return_value=vhdutils.VIRTUAL_STORAGE_TYPE_DEVICE_VHD)
+
+        self._vhdutils._open = mock.Mock(
+            return_value=vhdutils.ctypes.byref(
+                vhdutils.wintypes.HANDLE()))
+        self._vhdutils._close = mock.Mock()
+
+        fake_params = vhdutils.Win32_MERGE_VIRTUAL_DISK_PARAMETERS()
+        fake_params.Version = vhdutils.MERGE_VIRTUAL_DISK_VERSION_1
+        fake_params.MergeDepth = fake_merge_depth
+
+        vhdutils.virtdisk.MergeVirtualDisk.return_value = int(
+            merge_failed)
+        vhdutils.Win32_RESIZE_VIRTUAL_DISK_PARAMETERS.return_value = (
+            fake_params)
+
+        if merge_failed:
+            self.assertRaises(exception.VolumeBackendAPIException,
+                              self._vhdutils.merge_vhd,
+                              self._FAKE_VHD_PATH)
+        else:
+            self._vhdutils.merge_vhd(self._FAKE_VHD_PATH)
+
+        vhdutils.virtdisk.MergeVirtualDisk.assert_called_with(
+            vhdutils.ctypes.byref(vhdutils.wintypes.HANDLE()),
+            vhdutils.MERGE_VIRTUAL_DISK_FLAG_NONE,
+            vhdutils.ctypes.byref(fake_params),
+            None)
+
+    def test_merge_vhd_success(self):
+        self._test_merge_vhd()
+
+    def test_merge_vhd_failed(self):
+        self._test_merge_vhd(merge_failed=True)
+
+    def _test_get_vhd_info_member(self, get_vhd_info_failed=False):
+        fake_params = vhdutils.Win32_GET_VIRTUAL_DISK_INFO()
+        fake_params.VERSION = vhdutils.GET_VIRTUAL_DISK_INFO_SIZE
+        fake_info_size = vhdutils.ctypes.sizeof(fake_params)
+
+        vhdutils.Win32_GET_VIRTUAL_DISK_INFO.return_value = (
+            fake_params)
+        vhdutils.virtdisk.GetVirtualDiskInformation.return_value = (
+            get_vhd_info_failed)
+        self._vhdutils._close = mock.Mock()
+
+        if get_vhd_info_failed:
+            self.assertRaises(exception.VolumeBackendAPIException,
+                              self._vhdutils._get_vhd_info_member,
+                              self._FAKE_VHD_PATH,
+                              vhdutils.GET_VIRTUAL_DISK_INFO_SIZE)
+            self._vhdutils._close.assert_called_with(
+                self._FAKE_VHD_PATH)
+        else:
+            self._vhdutils._get_vhd_info_member(self._FAKE_VHD_PATH,
+                vhdutils.GET_VIRTUAL_DISK_INFO_SIZE)
+
+        vhdutils.virtdisk.GetVirtualDiskInformation.assert_called_with(
+            self._FAKE_VHD_PATH,
+            vhdutils.ctypes.byref(
+                vhdutils.ctypes.c_ulong(fake_info_size)),
+            vhdutils.ctypes.byref(fake_params), 0)
+
+    def test_get_vhd_info_member_success(self):
+        self._test_get_vhd_info_member()
+
+    def test_get_vhd_info_member_failed(self):
+        self._test_get_vhd_info_member(get_vhd_info_failed=True)
+
+    def _test_get_vhd_info(self):
+        self._vhdutils._get_device_id_by_path = mock.Mock(
+            return_value=vhdutils.VIRTUAL_STORAGE_TYPE_DEVICE_VHD)
+        self._vhdutils._open = mock.Mock(
+            return_value=vhdutils.ctypes.byref(
+                vhdutils.wintypes.HANDLE()))
