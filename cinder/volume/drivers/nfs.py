@@ -75,7 +75,6 @@ class NfsDriver(remotefs.RemoteFSDriver):
     VERSION = VERSION
 
     def __init__(self, execute=putils.execute, *args, **kwargs):
-        self._remotefsclient = None
         super(NfsDriver, self).__init__(*args, **kwargs)
         self.configuration.append_config_values(volume_opts)
         root_helper = utils.get_root_helper()
@@ -90,11 +89,6 @@ class NfsDriver(remotefs.RemoteFSDriver):
             'nfs', root_helper, execute=execute,
             nfs_mount_point_base=self.base,
             nfs_mount_options=opts)
-
-    def set_execute(self, execute):
-        super(NfsDriver, self).set_execute(execute)
-        if self._remotefsclient:
-            self._remotefsclient.set_execute(execute)
 
     def do_setup(self, context):
         """Any initialization the volume driver does while starting."""
@@ -217,32 +211,6 @@ class NfsDriver(remotefs.RemoteFSDriver):
                       nfs_share)
             return False
         return True
-
-    def _get_mount_point_for_share(self, nfs_share):
-        """Needed by parent class."""
-        return self._remotefsclient.get_mount_point(nfs_share)
-
-    def _get_capacity_info(self, nfs_share):
-        """Calculate available space on the NFS share.
-
-        :param nfs_share: example 172.18.194.100:/var/nfs
-        """
-
-        mount_point = self._get_mount_point_for_share(nfs_share)
-
-        df, _ = self._execute('stat', '-f', '-c', '%S %b %a', mount_point,
-                              run_as_root=True)
-        block_size, blocks_total, blocks_avail = map(float, df.split())
-        total_available = block_size * blocks_avail
-        total_size = block_size * blocks_total
-
-        du, _ = self._execute('du', '-sb', '--apparent-size', '--exclude',
-                              '*snapshot*', mount_point, run_as_root=True)
-        total_allocated = float(du.split()[0])
-        return total_size, total_available, total_allocated
-
-    def _get_mount_point_base(self):
-        return self.base
 
     def extend_volume(self, volume, new_size):
         """Extend an existing volume to the new size."""

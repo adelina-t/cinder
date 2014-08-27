@@ -64,6 +64,8 @@ class RemoteFSDriver(driver.VolumeDriver):
     SHARE_FORMAT_REGEX = r'.+:/.+'
 
     def __init__(self, *args, **kwargs):
+        self._remotefsclient = None
+        self.base = None
         super(RemoteFSDriver, self).__init__(*args, **kwargs)
         self.shares = {}
         self._mounted_shares = []
@@ -88,20 +90,27 @@ class RemoteFSDriver(driver.VolumeDriver):
             'mount_point_base': self._get_mount_point_base()
         }
 
-    def _get_mount_point_base(self):
-        """Returns the mount point base for the remote fs.
+    # def _get_mount_point_base(self):
+    #     """Returns the mount point base for the remote fs.
 
-           This method facilitates returning mount point base
-           for the specific remote fs. Override this method
-           in the respective driver to return the entry to be
-           used while attach/detach using brick in cinder.
-           If not overridden then it returns None without
-           raising exception to continue working for cases
-           when not used with brick.
-        """
-        LOG.debug("Driver specific implementation needs to return"
-                  " mount_point_base.")
-        return None
+    #        This method facilitates returning mount point base
+    #        for the specific remote fs. Override this method
+    #        in the respective driver to return the entry to be
+    #        used while attach/detach using brick in cinder.
+    #        If not overridden then it returns None without
+    #        raising exception to continue working for cases
+    #        when not used with brick.
+    #     """
+    #     LOG.debug("Driver specific implementation needs to return"
+    #               " mount_point_base.")
+    #     return None
+
+    def _get_mount_point_base(self):
+        return self.base
+
+    def _get_mount_point_for_share(self, remotefs_share):
+        """Needed by parent class."""
+        return self._remotefsclient.get_mount_point(remotefs_share)
 
     def create_volume(self, volume):
         """Creates a volume.
@@ -133,6 +142,11 @@ class RemoteFSDriver(driver.VolumeDriver):
             self._create_regular_file(volume_path, volume_size)
 
         self._set_rw_permissions_for_all(volume_path)
+
+    def set_execute(self, execute):
+        super(RemoteFSDriver, self).set_execute(execute)
+        if self._remotefsclient:
+            self._remotefsclient.set_execute(execute)
 
     def _ensure_shares_mounted(self):
         """Look for remote shares in the flags and tries to mount them
@@ -298,9 +312,6 @@ class RemoteFSDriver(driver.VolumeDriver):
 
         LOG.debug("shares loaded: %s", self.shares)
 
-    def _get_mount_point_for_share(self, path):
-        raise NotImplementedError()
-
     def terminate_connection(self, volume, connector, **kwargs):
         """Disallow connection from connector."""
         pass
@@ -355,8 +366,24 @@ class RemoteFSDriver(driver.VolumeDriver):
             else:
                 raise
 
-    def _get_capacity_info(self, share):
-        raise NotImplementedError()
+    def _get_capacity_info(self, remotefs_share):
+        """Calculate available space on the NFS share.
+
+        :param nfs_share: example 172.18.194.100:/var/nfs
+        """
+
+        mount_point = self._get_mount_point_for_share(remotefs_share)
+
+        df, _ = self._execute('stat', '-f', '-c', '%S %b %a', mount_point,
+                              run_as_root=True)
+        block_size, blocks_total, blocks_avail = map(float, df.split())
+        total_available = block_size * blocks_avail
+        total_size = block_size * blocks_total
+
+        du, _ = self._execute('du', '-sb', '--apparent-size', '--exclude',
+                              '*snapshot*', mount_point, run_as_root=True)
+        total_allocated = float(du.split()[0])
+        return total_size, total_available, total_allocated
 
     def _find_share(self, volume_size_in_gib):
         raise NotImplementedError()

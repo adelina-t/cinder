@@ -22,14 +22,14 @@ from oslo.config import cfg
 from cinder import exception
 from cinder import utils
 
-from cinder.brick.remotefs import remotefs
+from cinder.brick.remotefs import remotefs as remotefs_brick
 from cinder.image import image_utils
 from cinder.openstack.common import fileutils
 from cinder.openstack.common.gettextutils import _
 from cinder.openstack.common import log as logging
 from cinder.openstack.common import processutils as putils
 from cinder.openstack.common import units
-from cinder.volume.drivers import nfs
+from cinder.volume.drivers import remotefs
 
 
 VERSION = '1.0.0'
@@ -73,7 +73,7 @@ CONF = cfg.CONF
 CONF.register_opts(volume_opts)
 
 
-class SmbfsDriver(nfs.RemoteFsDriver):
+class SmbfsDriver(remotefs.RemoteFSDriver):
     """SMBFS based cinder volume driver.
     """
 
@@ -88,7 +88,6 @@ class SmbfsDriver(nfs.RemoteFsDriver):
     _DISK_FORMAT_QCOW2 = 'qcow2'
 
     def __init__(self, execute=putils.execute, *args, **kwargs):
-        self._remotefsclient = None
         super(SmbfsDriver, self).__init__(*args, **kwargs)
         self.configuration.append_config_values(volume_opts)
         root_helper = utils.get_root_helper()
@@ -98,16 +97,11 @@ class SmbfsDriver(nfs.RemoteFsDriver):
         opts = getattr(self.configuration,
                        'smbfs_mount_options',
                        CONF.smbfs_mount_options)
-        self._remotefsclient = remotefs.RemoteFsClient(
+        self._remotefsclient = remotefs_brick.RemoteFsClient(
             'cifs', root_helper, execute=execute,
             smbfs_mount_point_base=self.base,
             smbfs_mount_options=opts)
         self.img_suffix = None
-
-    def set_execute(self, execute):
-        super(SmbfsDriver, self).set_execute(execute)
-        if self._remotefsclient:
-            self._remotefsclient.set_execute(execute)
 
     def initialize_connection(self, volume, connector):
         """Allow connection to connector and return connection info.
@@ -183,13 +177,6 @@ class SmbfsDriver(nfs.RemoteFsDriver):
         if qemu_format and volume_format == self._DISK_FORMAT_VHD:
             volume_format = 'vpc'
         return volume_format
-
-    def _get_mount_point_base(self):
-        return self.base
-
-    def _get_mount_point_for_share(self, smbfs_share):
-        """Needed by parent class."""
-        return self._remotefsclient.get_mount_point(smbfs_share)
 
     def delete_volume(self, volume):
         """Deletes a logical volume."""
@@ -268,25 +255,6 @@ class SmbfsDriver(nfs.RemoteFsDriver):
                 self._create_regular_file(volume_path, volume_size)
 
         self._set_rw_permissions_for_all(volume_path)
-
-    def _get_capacity_info(self, smbfs_share):
-        """Calculate available space on the SMBFS share.
-
-        :param smbfs_share: example //172.18.194.100/share
-        """
-
-        mount_point = self._get_mount_point_for_share(smbfs_share)
-
-        df, _ = self._execute('stat', '-f', '-c', '%S %b %a', mount_point,
-                              run_as_root=True)
-        block_size, blocks_total, blocks_avail = map(float, df.split())
-        total_available = block_size * blocks_avail
-        total_size = block_size * blocks_total
-
-        du, _ = self._execute('du', '-sb', '--apparent-size', '--exclude',
-                              '*snapshot*', mount_point, run_as_root=True)
-        total_allocated = float(du.split()[0])
-        return total_size, total_available, total_allocated
 
     def _find_share(self, volume_size_in_gib):
         """Choose SMBFS share among available ones for given volume size.
