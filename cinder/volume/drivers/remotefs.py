@@ -377,6 +377,7 @@ class RemoteFSSnapDriver(RemoteFSDriver):
 
     def __init__(self, *args, **kwargs):
         self._remotefsclient = None
+        self._nova = None
         self.base = None
         super(RemoteFSSnapDriver, self).__init__(*args, **kwargs)
 
@@ -1138,7 +1139,7 @@ class RemoteFSSnapDriver(RemoteFSDriver):
                 if seconds_elapsed > timeout:
                     msg = _('Timed out while waiting for Nova update '
                             'for creation of snapshot %s.') % snapshot['id']
-                    raise exception.GlusterfsException(msg)
+                    raise exception.RemotefsException(msg)
         else:
             self._do_create_snapshot(snapshot,
                                      backing_filename,
