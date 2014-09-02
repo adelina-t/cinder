@@ -409,7 +409,7 @@ class GlusterfsDriver(remotefs_drv.RemoteFSSnapDriver):
         pass
 
     @utils.synchronized('glusterfs', external=False)
-    def _copy_volume_to_image(self, context, volume,
+    def copy_volume_to_image(self, context, volume,
                               image_service, image_meta):
         self._copy_volume_to_image(context, volume, image_service, image_meta)
 

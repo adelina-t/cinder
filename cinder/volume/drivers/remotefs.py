@@ -550,7 +550,7 @@ class RemoteFSSnapDriver(RemoteFSDriver):
         """Copy the volume to the specified image."""
 
         # If snapshots exist, flatten to a temporary image, and upload it
-
+        print "in copy volume"
         active_file = self.get_active_image_from_info(volume)
         active_file_path = os.path.join(self._local_volume_dir(volume),
                                         active_file)
